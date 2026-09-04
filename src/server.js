@@ -4,6 +4,8 @@ const fastify = require('fastify')({
 
 const pool = require('./db');
 
+const posthog = require('./posthog');
+
 const {
   generateApiKey,
   hashApiKey,
@@ -106,10 +108,23 @@ fastify.get('/items', async (request, reply) => {
       ? 'ASC'
       : 'DESC';
 
-  const search = request.query.search || '';
-  const offset = (page - 1) * limit;
+const search = request.query.search || '';
+const offset = (page - 1) * limit;
 
-  let result;
+if (search) {
+  const searchEnabled = await posthog.isFeatureEnabled(
+    'is-full-text-search-enabled',
+    'public-api'
+  );
+
+  if (!searchEnabled) {
+    return reply.status(503).send({
+      error: 'Full-text search is currently disabled'
+    });
+  }
+}
+
+let result;
 
   if (search) {
     result = await pool.query(
