@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "description": "Campus Lost-and-Found API – Continuous Integration semester project",
   "main": "index.js",
-  "scripts": {
-    "test": "jest --runInBand",
-    "test:coverage": "jest --coverage --runInBand"
-  },
+"scripts": {
+  "test": "jest --runInBand",
+  "test:coverage": "jest --coverage --runInBand",
+  "security:snyk": "snyk test"
+},
   "repository": {
     "type": "git",
     "url": "git+https://github.com/iselinmag/campus-lost-and-found-api.git"
@@ -25,6 +26,7 @@
     "posthog-node": "^5.51.6"
   },
   "devDependencies": {
-    "jest": "^30.5.1"
+    "jest": "^30.5.1",
+    "snyk": "^1.1307.0"
   }
 }
