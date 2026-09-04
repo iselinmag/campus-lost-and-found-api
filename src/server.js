@@ -4,6 +4,65 @@ const fastify = require('fastify')({
 
 const pool = require('./db');
 
+const {
+  generateApiKey,
+  hashApiKey,
+  apiKeysMatch
+} = require('./apiKey');
+
+async function requireApiKey(request, reply) {
+  const apiKey = request.headers['x-api-key'];
+
+  if (!apiKey) {
+    return reply.status(401).send({
+      error: 'API key is required'
+    });
+  }
+
+  const result = await pool.query(
+    'SELECT key_hash FROM api_keys WHERE id = 1'
+  );
+
+  if (result.rows.length === 0) {
+    return reply.status(401).send({
+      error: 'Invalid API key'
+    });
+  }
+
+  const isValid = apiKeysMatch(
+    apiKey,
+    result.rows[0].key_hash
+  );
+
+  if (!isValid) {
+    return reply.status(401).send({
+      error: 'Invalid API key'
+    });
+  }
+}
+
+fastify.post(
+  '/api-key/rotate',
+  { preHandler: requireApiKey },
+  async (request, reply) => {
+    const newApiKey = generateApiKey();
+    const newKeyHash = hashApiKey(newApiKey);
+
+    await pool.query(
+      `UPDATE api_keys
+       SET key_hash = $1,
+           updated_at = NOW()
+       WHERE id = 1`,
+      [newKeyHash]
+    );
+
+    return reply.status(200).send({
+      message: 'API key rotated successfully',
+      apiKey: newApiKey
+    });
+  }
+);
+
 fastify.get('/', async (request, reply) => {
   return {
     message: 'Campus Lost-and-Found API is running'
@@ -19,7 +78,7 @@ fastify.get('/db-test', async (request, reply) => {
   };
 });
 
-fastify.post('/items', async (request, reply) => {
+fastify.post('/items', { preHandler: requireApiKey }, async (request, reply) => {
   const { name, description, lost_date, metadata } = request.body;
 
   if (!name || !description || !lost_date) {
@@ -102,7 +161,7 @@ fastify.get('/items/:id', async (request, reply) => {
   return result.rows[0];
 });
 
-fastify.put('/items/:id', async (request, reply) => {
+fastify.put('/items/:id', { preHandler: requireApiKey }, async (request, reply) => {
   const id = Number(request.params.id);
 
   if (!Number.isInteger(id) || id <= 0) {
@@ -141,7 +200,7 @@ fastify.put('/items/:id', async (request, reply) => {
   return result.rows[0];
 });
 
-fastify.delete('/items/:id', async (request, reply) => {
+fastify.delete('/items/:id', { preHandler: requireApiKey }, async (request, reply) => {
   const id = Number(request.params.id);
 
   if (!Number.isInteger(id) || id <= 0) {
