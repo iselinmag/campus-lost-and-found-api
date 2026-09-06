@@ -100,3 +100,177 @@ jobs:
         run: |
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/campus-lost-and-found-api:${{ github.sha }}
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/campus-lost-and-found-api:latest
+   
+  deploy-staging:
+    name: Deploy to Inactive Environment
+    runs-on: ubuntu-latest
+    needs: deliver
+    if: github.event_name == 'push' && github.ref == 'refs/heads/deploy/production'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/ec2_key
+          chmod 600 ~/.ssh/ec2_key
+          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
+
+      - name: Copy deployment files to EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        run: |
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "mkdir -p ~/deploy"
+
+          scp -i ~/.ssh/ec2_key \
+            deploy/compose.yaml \
+            deploy/switch.sh \
+            tests/performance/items-load.js \
+            "$EC2_USER@$EC2_HOST:~/deploy/"
+
+          scp -i ~/.ssh/ec2_key \
+            deploy/nginx.conf \
+            "$EC2_USER@$EC2_HOST:~/deploy/nginx.conf.default"
+
+      - name: Deploy new image to inactive environment
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/campus-lost-and-found-api:${{ github.sha }}
+        run: |
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "bash -s -- '$IMAGE'" <<'REMOTE'
+          set -euo pipefail
+
+          IMAGE="$1"
+          cd ~/deploy
+          chmod +x switch.sh
+
+          if [ ! -f nginx.conf ]; then
+            cp nginx.conf.default nginx.conf
+          fi
+
+          if grep -q "proxy_pass http://blue:3000;" nginx.conf; then
+            TARGET="green"
+          elif grep -q "proxy_pass http://green:3000;" nginx.conf; then
+            TARGET="blue"
+          else
+            echo "Could not determine active environment."
+            exit 1
+          fi
+
+          echo "Deploying $IMAGE to inactive environment: $TARGET"
+
+          docker pull "$IMAGE"
+
+          if [ "$TARGET" = "green" ]; then
+            GREEN_IMAGE="$IMAGE" docker compose up -d --no-deps --force-recreate green
+          else
+            BLUE_IMAGE="$IMAGE" docker compose up -d --no-deps --force-recreate blue
+          fi
+
+          for i in $(seq 1 30); do
+            STATUS=$(docker inspect \
+              -f '{{.State.Health.Status}}' \
+              "lostfound-$TARGET" 2>/dev/null || true)
+
+            echo "$TARGET health: $STATUS"
+
+            if [ "$STATUS" = "healthy" ]; then
+              echo "$TARGET is ready for staging tests."
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          echo "$TARGET did not become healthy."
+          docker logs "lostfound-$TARGET"
+          exit 1
+          REMOTE
+
+  performance-test:
+    name: k6 Performance Test on Staging
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.event_name == 'push' && github.ref == 'refs/heads/deploy/production'
+
+    steps:
+      - name: Configure SSH
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/ec2_key
+          chmod 600 ~/.ssh/ec2_key
+          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
+
+      - name: Run k6 against inactive environment
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        run: |
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" <<'REMOTE'
+          set -euo pipefail
+          cd ~/deploy
+
+          if grep -q "proxy_pass http://blue:3000;" nginx.conf; then
+            TARGET="green"
+          elif grep -q "proxy_pass http://green:3000;" nginx.conf; then
+            TARGET="blue"
+          else
+            echo "Could not determine staging environment."
+            exit 1
+          fi
+
+          echo "Running k6 against staging environment: $TARGET"
+
+          docker run --rm \
+            --network deploy_default \
+            -v "$PWD/items-load.js:/scripts/items-load.js:ro" \
+            grafana/k6:latest \
+            run \
+            -e BASE_URL="http://$TARGET:3000" \
+            /scripts/items-load.js
+          REMOTE
+
+  switch-production:
+    name: Blue Green Traffic Switch
+    runs-on: ubuntu-latest
+    needs: performance-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/deploy/production'
+
+    steps:
+      - name: Configure SSH
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/ec2_key
+          chmod 600 ~/.ssh/ec2_key
+          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
+
+      - name: Switch production traffic
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        run: |
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" <<'REMOTE'
+          set -euo pipefail
+          cd ~/deploy
+
+          ./switch.sh
+
+          echo "Verifying production API after switch..."
+          curl -fsS http://localhost/
+          echo
+          curl -fsS http://localhost/db-test
+          echo
+          REMOTE

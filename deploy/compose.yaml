@@ -1,6 +1,6 @@
 services:
   blue:
-    image: ismagnus/campus-lost-and-found-api:latest
+    image: ${BLUE_IMAGE:-ismagnus/campus-lost-and-found-api:latest}
     container_name: lostfound-blue
     env_file:
       - ../.env
@@ -18,7 +18,7 @@ services:
       retries: 5
 
   green:
-    image: ismagnus/campus-lost-and-found-api:latest
+    image: ${GREEN_IMAGE:-ismagnus/campus-lost-and-found-api:latest}
     container_name: lostfound-green
     env_file:
       - ../.env
