@@ -35,6 +35,15 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
+      - name: Generate coverage for SonarQube
+        run: npm run test:coverage
+
+      - name: Run SonarQube analysis
+        run: npm run quality:sonar
+        env:
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -100,7 +109,7 @@ jobs:
         run: |
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/campus-lost-and-found-api:${{ github.sha }}
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/campus-lost-and-found-api:latest
-   
+
   deploy-staging:
     name: Deploy to Inactive Environment
     runs-on: ubuntu-latest
