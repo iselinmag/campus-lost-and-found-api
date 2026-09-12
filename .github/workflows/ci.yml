@@ -35,6 +35,11 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
+      - name: Run Snyk Code scan
+        run: npm run security:snyk-code
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
       - name: Generate coverage for SonarQube
         run: npm run test:coverage
 
