@@ -132,7 +132,7 @@ let result;
        FROM items
        WHERE to_tsvector('english', name || ' ' || description)
        @@ plainto_tsquery('english', $1)
-       ORDER BY created_at ${sort}
+       ORDER BY lost_date ${sort}
        LIMIT $2 OFFSET $3`,
       [search, limit, offset]
     );
@@ -140,7 +140,7 @@ let result;
     result = await pool.query(
       `SELECT *
        FROM items
-       ORDER BY created_at ${sort}
+       ORDER BY lost_date ${sort}
        LIMIT $1 OFFSET $2`,
       [limit, offset]
     );
