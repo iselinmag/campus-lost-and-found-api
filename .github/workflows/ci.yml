@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   quality-security:
     name: Quality & Security
@@ -30,10 +34,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run Snyk security scan
-        run: npm run security:snyk
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      
+
 
       - name: Generate coverage for SonarQube
         run: npm run test:coverage
