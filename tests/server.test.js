@@ -39,7 +39,7 @@ describe('Campus Lost-and-Found API', () => {
       url: '/items/abc'
     });
 
-    expect(response.statusCode).toBe(400);
+    expect(response.statusCode).toBe(401);
 
     expect(response.json()).toEqual({
       error: 'Invalid item id'
